@@ -45,9 +45,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 patchsrc/wg-handoff-fix.py \
-            rethink-app/app/src/main/java/com/celzero/bravedns/net/go/GoVpnAdapter.kt
-          grep -n "avoidReaddingProxies" \
-            rethink-app/app/src/main/java/com/celzero/bravedns/net/go/GoVpnAdapter.kt
+            rethink-app/app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt
+          grep -n -A8 "active nw fallback" \
+            rethink-app/app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt || true
 
       - name: Build APK
         working-directory: rethink-app
