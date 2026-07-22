@@ -46,8 +46,12 @@ jobs:
           set -euo pipefail
           python3 patchsrc/wg-handoff-fix.py \
             rethink-app/app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt
-          grep -n -A8 "active nw fallback" \
-            rethink-app/app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt || true
+          echo "--- patch 1 (nws.isEmpty fallback) ---"
+          grep -n "nws-empty activeNw fallback" \
+            rethink-app/app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt
+          echo "--- patch 2 (useActive fallback) ---"
+          grep -n "useActive activeNw fallback" \
+            rethink-app/app/src/main/java/com/celzero/bravedns/service/BraveVPNService.kt
 
       - name: Build APK
         working-directory: rethink-app
