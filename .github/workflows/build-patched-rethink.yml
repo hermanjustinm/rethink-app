@@ -22,7 +22,8 @@ jobs:
     steps:
       - name: Checkout your fork (for the patch script)
         uses: actions/checkout@v4
-        with: { path: patchsrc }
+        with:
+          path: patchsrc
 
       - name: Checkout rethink-app
         uses: actions/checkout@v4
@@ -41,18 +42,31 @@ jobs:
           [ -n "$c" ] || { echo "no firestack commit"; exit 1; }
           echo "commit=$c" >> "$GITHUB_OUTPUT"; echo "firestack=$c"
 
-      - name: Checkout firestack @ pinned commit
+      - name: Checkout firestack (full history)
         uses: actions/checkout@v4
         with:
           repository: celzero/firestack
-          ref: ${{ steps.fs.outputs.commit }}
           path: firestack
           fetch-depth: 0
+          ref: n2
+
+      - name: Check out the pinned firestack commit
+        working-directory: firestack
+        run: |
+          git fetch --all --tags
+          git checkout ${{ steps.fs.outputs.commit }}
+          echo "firestack now at: $(git rev-parse HEAD)"
 
       - uses: actions/setup-go@v5
-        with: { go-version: "1.26.0", check-latest: false }
+        with:
+          go-version: "1.26.0"
+          check-latest: false
+
       - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: "17" }
+        with:
+          distribution: temurin
+          java-version: "17"
+
       - uses: android-actions/setup-android@v3
 
       - name: NDK + SDK
@@ -95,11 +109,12 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleFdroidFullDebug --no-daemon --stacktrace
 
-      - name: Find + upload APK
+      - name: Find APK
         run: |
           set -euo pipefail
           p=$(find rethink-app/app/build/outputs/apk -name "*fdroid*Debug*.apk" | head -1)
           echo "APK_PATH=$p" >> "$GITHUB_ENV"
+
       - uses: actions/upload-artifact@v4
         with:
           name: rethink-patched-fdroid-debug
