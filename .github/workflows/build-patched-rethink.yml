@@ -109,14 +109,9 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleFdroidFullDebug --no-daemon --stacktrace
 
-      - name: Find APK
-        run: |
-          set -euo pipefail
-          p=$(find rethink-app/app/build/outputs/apk -name "*fdroid*Debug*.apk" | head -1)
-          echo "APK_PATH=$p" >> "$GITHUB_ENV"
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: rethink-patched-fdroid-debug
-          path: ${{ env.APK_PATH }}
+          path: rethink-app/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
