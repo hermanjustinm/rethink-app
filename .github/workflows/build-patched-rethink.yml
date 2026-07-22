@@ -6,11 +6,7 @@ on:
       app_tag:
         description: "rethink-app git tag/branch"
         required: true
-        default: "v0.5.5x"
-      firestack_commit_override:
-        description: "Optional firestack commit (blank = read gradle.properties)"
-        required: false
-        default: ""
+        default: "v0.5.5y"
 
 permissions:
   contents: read
@@ -18,7 +14,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - name: Checkout your fork (for the patch script)
         uses: actions/checkout@v4
@@ -32,36 +28,6 @@ jobs:
           ref: ${{ github.event.inputs.app_tag }}
           path: rethink-app
 
-      - name: Resolve pinned firestack commit
-        id: fs
-        run: |
-          set -euo pipefail
-          o="${{ github.event.inputs.firestack_commit_override }}"
-          if [ -n "$o" ]; then c="$o"; else
-            c=$(grep -E '^firestackCommit=' rethink-app/gradle.properties | cut -d= -f2 | tr -d '[:space:]'); fi
-          [ -n "$c" ] || { echo "no firestack commit"; exit 1; }
-          echo "commit=$c" >> "$GITHUB_OUTPUT"; echo "firestack=$c"
-
-      - name: Checkout firestack (full history)
-        uses: actions/checkout@v4
-        with:
-          repository: celzero/firestack
-          path: firestack
-          fetch-depth: 0
-          ref: n2
-
-      - name: Check out the pinned firestack commit
-        working-directory: firestack
-        run: |
-          git fetch --all --tags
-          git checkout ${{ steps.fs.outputs.commit }}
-          echo "firestack now at: $(git rev-parse HEAD)"
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.0"
-          check-latest: false
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -73,34 +39,15 @@ jobs:
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;34.0.0" "ndk;26.1.10909125"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.1.10909125" >> "$GITHUB_ENV"
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;34.0.0"
 
-      - name: Apply patch
+      - name: Apply handoff fix
         run: |
           set -euo pipefail
-          python3 patchsrc/wgconn-latestOpen-fix.py firestack/intra/ipn/wg/wgconn.go
-          grep -n "sendObsMsg(Opn" firestack/intra/ipn/wg/wgconn.go
-
-      - name: Build firestack AAR
-        working-directory: firestack
-        run: |
-          set -euo pipefail
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
-          export PATH="$PATH:$(go env GOPATH)/bin"
-          make intra
-          test -s build/intra/tun2socks.aar
-
-      - name: Wire AAR into app
-        run: |
-          set -euo pipefail
-          mkdir -p rethink-app/app/libs
-          cp firestack/build/intra/tun2socks.aar rethink-app/app/libs/firestack-patched.aar
-          gb=rethink-app/app/build.gradle
-          sed -i 's|    fdroidImplementation firestackDependency()|    fdroidImplementation files("libs/firestack-patched.aar")|' "$gb"
-          sed -i 's|    download firestackDependency()|    download files("libs/firestack-patched.aar")|' "$gb"
+          python3 patchsrc/wg-handoff-fix.py \
+            rethink-app/app/src/main/java/com/celzero/bravedns/net/go/GoVpnAdapter.kt
+          grep -n "avoidReaddingProxies" \
+            rethink-app/app/src/main/java/com/celzero/bravedns/net/go/GoVpnAdapter.kt
 
       - name: Build APK
         working-directory: rethink-app
@@ -112,6 +59,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: rethink-patched-fdroid-debug
+          name: rethink-patched-handoff-fix
           path: rethink-app/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
