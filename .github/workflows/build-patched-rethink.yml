@@ -1,0 +1,107 @@
+name: Build patched Rethink (WG handoff fix)
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_tag:
+        description: "rethink-app git tag/branch"
+        required: true
+        default: "v0.5.5x"
+      firestack_commit_override:
+        description: "Optional firestack commit (blank = read gradle.properties)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout your fork (for the patch script)
+        uses: actions/checkout@v4
+        with: { path: patchsrc }
+
+      - name: Checkout rethink-app
+        uses: actions/checkout@v4
+        with:
+          repository: celzero/rethink-app
+          ref: ${{ github.event.inputs.app_tag }}
+          path: rethink-app
+
+      - name: Resolve pinned firestack commit
+        id: fs
+        run: |
+          set -euo pipefail
+          o="${{ github.event.inputs.firestack_commit_override }}"
+          if [ -n "$o" ]; then c="$o"; else
+            c=$(grep -E '^firestackCommit=' rethink-app/gradle.properties | cut -d= -f2 | tr -d '[:space:]'); fi
+          [ -n "$c" ] || { echo "no firestack commit"; exit 1; }
+          echo "commit=$c" >> "$GITHUB_OUTPUT"; echo "firestack=$c"
+
+      - name: Checkout firestack @ pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: celzero/firestack
+          ref: ${{ steps.fs.outputs.commit }}
+          path: firestack
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26.0", check-latest: false }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: android-actions/setup-android@v3
+
+      - name: NDK + SDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;34.0.0" "ndk;26.1.10909125"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.1.10909125" >> "$GITHUB_ENV"
+
+      - name: Apply patch
+        run: |
+          set -euo pipefail
+          python3 patchsrc/wgconn-latestOpen-fix.py firestack/intra/ipn/wg/wgconn.go
+          grep -n "sendObsMsg(Opn" firestack/intra/ipn/wg/wgconn.go
+
+      - name: Build firestack AAR
+        working-directory: firestack
+        run: |
+          set -euo pipefail
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          make intra
+          test -s build/intra/tun2socks.aar
+
+      - name: Wire AAR into app
+        run: |
+          set -euo pipefail
+          mkdir -p rethink-app/app/libs
+          cp firestack/build/intra/tun2socks.aar rethink-app/app/libs/firestack-patched.aar
+          gb=rethink-app/app/build.gradle
+          sed -i 's|    fdroidImplementation firestackDependency()|    fdroidImplementation files("libs/firestack-patched.aar")|' "$gb"
+          sed -i 's|    download firestackDependency()|    download files("libs/firestack-patched.aar")|' "$gb"
+
+      - name: Build APK
+        working-directory: rethink-app
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleFdroidFullDebug --no-daemon --stacktrace
+
+      - name: Find + upload APK
+        run: |
+          set -euo pipefail
+          p=$(find rethink-app/app/build/outputs/apk -name "*fdroid*Debug*.apk" | head -1)
+          echo "APK_PATH=$p" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rethink-patched-fdroid-debug
+          path: ${{ env.APK_PATH }}
+          if-no-files-found: error
